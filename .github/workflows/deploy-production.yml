@@ -1,0 +1,56 @@
+name: Deploy to Linode
+on:
+  push:
+    branches:
+      - main
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # - name: Migrate postgres
+      #   run: goose -dir migrations postgres "host=${{ secrets.POSTGRES_HOST }} port=5432 user=${{ secrets.POSTGRES_USER }} password=${{ secrets.POSTGRES_PASSWORD }} dbname=crawler sslmode=require" up
+      #   working-directory: backend
+
+      - name: Build app
+        run: go build -o app cmd/main.go
+
+      - name: SCP to Linode instance ( Binary )
+        uses: appleboy/scp-action@master
+        with:
+          host: ${{ secrets.IP_ADDRESS }}
+          username: "root"
+          key: ${{ secrets.SSH_KEY }}
+          port: 22
+          source: "app"
+          target: "/root"
+
+      - uses: zerodays/action-infisical@v1
+        name: Load .env from Infisical
+        with:
+          infisical_token: ${{ secrets.INFISICAL_TOKEN }}
+          workspace_id: ${{ secrets.INFISICAL_WORKSPACE_ID }}
+          environment: "production"
+
+      - name: SCP to Linode instance ( .env )
+        uses: appleboy/scp-action@master
+        with:
+          host: ${{ secrets.IP_ADDRESS }}
+          username: ${{ secrets.SSH_USERNAME }}
+          key: ${{ secrets.SSH_KEY }}
+          port: 22
+          source: ".env"
+          target: "/root"
+
+      - name: Restart systemd service
+        uses: appleboy/ssh-action@master
+        with:
+          host: ${{ secrets.IP_ADDRESS }}
+          username: ${{ secrets.SSH_USERNAME }}
+          key: ${{ secrets.SSH_KEY }}
+          port: 22
+          script:
+            sudo systemctl stop app && sudo mv /root/app /usr/local/bin/app &&
+            sudo mkdir -p /root/app && sudo mv /root/.env /root/app/.env &&
+            sudo systemctl restart app && sudo systemctl status app
